@@ -1,10 +1,9 @@
-# AWS Infrastructure Architecture Diagram (Free Tier Compatible)
-
-
 
 ## Architecture Overview (Free Tier Compatible)
 
 ### 🏗️ **Infrastructure Components**
+
+![alt text](vpc_secure.png)
 
 **VPC (Virtual Private Cloud)**
 - CIDR: 10.0.0.0/16
