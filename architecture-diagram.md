@@ -126,3 +126,5 @@ graph TB
 - Sensitive database password stored in variables
 
 This architecture follows AWS best practices for a secure, scalable web application with proper network segmentation and security controls.
+
+

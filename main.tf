@@ -120,28 +120,8 @@ resource "aws_subnet" "private_db" {
   }
 }
 
-# Elastic IP for NAT Gateway
-resource "aws_eip" "nat" {
-  domain = "vpc"
-  
-  tags = {
-    Name = "nat-eip"
-  }
-
-  depends_on = [aws_internet_gateway.main]
-}
-
-# NAT Gateway
-resource "aws_nat_gateway" "main" {
-  allocation_id = aws_eip.nat.id
-  subnet_id     = aws_subnet.public.id
-
-  tags = {
-    Name = "main-nat-gateway"
-  }
-
-  depends_on = [aws_internet_gateway.main]
-}
+# Note: NAT Gateway removed to keep infrastructure free tier compatible
+# Jump host will be used instead for accessing private resources
 # Route Table for Public Subnet
 resource "aws_route_table" "public" {
   vpc_id = aws_vpc.main.id
@@ -156,14 +136,12 @@ resource "aws_route_table" "public" {
   }
 }
 
-# Route Table for Private Subnet
+# Route Table for Private Subnet (no internet access)
 resource "aws_route_table" "private" {
   vpc_id = aws_vpc.main.id
 
-  route {
-    cidr_block     = "0.0.0.0/0"
-    nat_gateway_id = aws_nat_gateway.main.id
-  }
+  # No default route - private subnets are isolated
+  # Access via jump host for SSH connections
 
   tags = {
     Name = "private-route-table"
@@ -223,6 +201,35 @@ resource "aws_security_group" "web" {
   }
 }
 
+# Jump Host Security Group
+resource "aws_security_group" "jump_host" {
+  name        = "jump-host-security-group"
+  description = "Security group for jump host (bastion)"
+  vpc_id      = aws_vpc.main.id
+
+  # SSH access from anywhere (you can restrict this to your IP)
+  ingress {
+    description = "SSH"
+    from_port   = 22
+    to_port     = 22
+    protocol    = "tcp"
+    cidr_blocks = ["0.0.0.0/0"]  # Consider restricting to your IP for better security
+  }
+
+  # Outbound access
+  egress {
+    description = "All outbound traffic"
+    from_port   = 0
+    to_port     = 0
+    protocol    = "-1"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+
+  tags = {
+    Name = "jump-host-security-group"
+  }
+}
+
 # Database Security Group
 resource "aws_security_group" "database" {
   name        = "database-security-group"
@@ -244,6 +251,15 @@ resource "aws_security_group" "database" {
     to_port         = 5432
     protocol        = "tcp"
     security_groups = [aws_security_group.web.id]
+  }
+
+  # Allow SSH access from jump host for database administration
+  ingress {
+    description     = "SSH from Jump Host"
+    from_port       = 22
+    to_port         = 22
+    protocol        = "tcp"
+    security_groups = [aws_security_group.jump_host.id]
   }
 
   # Outbound rules - allow all for updates and maintenance
@@ -280,6 +296,29 @@ resource "aws_instance" "web_server" {
   tags = {
     Name = "web-server"
     Type = "WebServer"
+  }
+}
+
+# Jump Host (Bastion) Instance
+resource "aws_instance" "jump_host" {
+  ami                    = data.aws_ami.amazon_linux.id
+  instance_type          = "t3.micro"
+  subnet_id              = aws_subnet.public.id
+  vpc_security_group_ids = [aws_security_group.jump_host.id]
+
+  # You'll need to add your SSH key pair name here
+  # key_name = "your-key-pair-name"
+
+  user_data = <<-EOF
+              #!/bin/bash
+              yum update -y
+              yum install -y postgresql15
+              echo "Jump host ready for SSH access to private resources" > /home/ec2-user/README.txt
+              EOF
+
+  tags = {
+    Name = "jump-host"
+    Type = "JumpHost"
   }
 }
 
@@ -344,9 +383,14 @@ output "internet_gateway_id" {
   value       = aws_internet_gateway.main.id
 }
 
-output "nat_gateway_id" {
-  description = "ID of the NAT Gateway"
-  value       = aws_nat_gateway.main.id
+output "jump_host_id" {
+  description = "ID of the jump host instance"
+  value       = aws_instance.jump_host.id
+}
+
+output "jump_host_public_ip" {
+  description = "Public IP address of the jump host"
+  value       = aws_instance.jump_host.public_ip
 }
 
 output "web_security_group_id" {
@@ -357,6 +401,11 @@ output "web_security_group_id" {
 output "database_security_group_id" {
   description = "ID of the database security group"
   value       = aws_security_group.database.id
+}
+
+output "jump_host_security_group_id" {
+  description = "ID of the jump host security group"
+  value       = aws_security_group.jump_host.id
 }
 
 output "web_server_id" {
